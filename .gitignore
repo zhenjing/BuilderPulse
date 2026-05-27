@@ -1,0 +1,32 @@
+# Generated reports
+HackerNews_*.md
+BuilderPulse_*.md
+BuilderPulse_差异分析_*.md
+
+# Data caches
+.claude/hn_data*.json
+.claude/builderpulse_data*.json
+hn_data.json
+hn_data_*.json
+hn_two_posts.json
+
+# Local settings
+.claude/settings.local.json
+
+# Python
+__pycache__/
+*.pyc
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Legacy distribution
+BuilderPulse-main/
+
+# Media
+*.webm
