@@ -2,6 +2,7 @@
 HackerNews_*.md
 BuilderPulse_*.md
 BuilderPulse_差异分析_*.md
+TrendingAnalysis_*.md
 
 # Data caches
 .claude/hn_data*.json
@@ -9,6 +10,7 @@ BuilderPulse_差异分析_*.md
 hn_data.json
 hn_data_*.json
 hn_two_posts.json
+trending_data.json
 
 # Local settings
 .claude/settings.local.json

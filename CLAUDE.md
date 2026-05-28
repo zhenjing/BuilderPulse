@@ -16,6 +16,20 @@ Analyze Hacker News front page for user complaints and generate a daily report.
 2. Claude analyzes the JSON, identifies Top 5 complaints, proposes product solutions
 3. Write final report to `HackerNews_{YYYY-MM-DD}.md`
 
+### Trending Analyzer
+Analyze GitHub Trending page repos for user needs, competitive advantage, and commercialization potential.
+
+**Usage:** `/trending` — scrapes trending page, enriches via API, analyzes each repo for user needs, differentiators, and business viability.
+
+**Implementation:**
+- Skill definition: `.claude/skills/trending-analyzer.md`
+- Data fetcher: `.claude/scripts/trending_analyzer.py`
+
+**Workflow:**
+1. Run `.claude/scripts/trending_analyzer.py trending_data.json` to fetch + enrich data → outputs JSON
+2. Claude analyzes each repo: problem solved, competitive advantage, commercialization
+3. Write final report to `TrendingAnalysis_{YYYY-MM-DD}.md`
+
 ### BuilderPulse
 Fetch 7 data sources, cross-validate signals, and generate a Chinese product daily brief for indie hackers.
 
