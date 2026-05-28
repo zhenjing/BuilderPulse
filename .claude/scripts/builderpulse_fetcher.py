@@ -9,12 +9,12 @@ All sources accessible without authentication and functional behind GFW.
 """
 
 import json
-import urllib.request
-import urllib.parse
-import re
 import sys
 import io
 import time
+import urllib.request
+import urllib.parse
+import re
 import xml.etree.ElementTree as ET
 from datetime import datetime, timedelta, timezone
 from html.parser import HTMLParser
@@ -235,6 +235,112 @@ def fetch_hn_show_stories(limit=15):
         return []
 
 
+# ── Star Fake Score ────────────────────────────────────────────────────────
+
+SPAM_KEYWORDS = {
+    "casino", "bonus", "crack", "cheat", "trading-bot", "crypto-bot",
+    "stake", "bypass", "exploit", "cracked", "keygen", "no-deposit",
+    "free-spins", "poker-bot", "hack", "wallhack", "aimbot",
+    "airdrop", "token-launch", "presale",
+}
+
+SPAM_TOPICS = {
+    "casino", "casino-bonus", "trading-bot", "crypto-bot", "crypto-trading-bot",
+    "arbitrage-trading-bot", "perp-trading-bot", "dex-trading-bot",
+    "cheat", "cheat2026", "pixel-scan-bot",
+    "wallet-drainer", "crypto-drainer",
+    "apk-mod", "mod-menu", "cracked-games",
+}
+
+
+def star_fake_score(repo):
+    """Return 0-100 fake-star probability for a GitHub repo dict.
+    Signals: fork/star ratio, keyword stuffing, spam topics, issue vacuum,
+    star velocity, name patterns.
+    """
+    score = 0
+    signals = []
+    stars = repo.get("stargazers_count", 0) or 0
+    forks = repo.get("forks_count", 0) or 0
+    issues = repo.get("open_issues_count", 0) or 0
+    desc = (repo.get("description") or "").lower()
+    topics = [t.lower() for t in (repo.get("topics") or [])]
+    full_name = repo.get("full_name", "")
+    created_str = repo.get("created_at") or ""
+    age_days = repo.get("age_days", 30)
+
+    # 1. fork/star ratio
+    ratio = forks / max(stars, 1)
+    if stars >= 50:
+        if ratio > 5:
+            score += 40; signals.append(f"fork/star={ratio:.1f}x — bot farm")
+        elif ratio > 2:
+            score += 25; signals.append(f"fork/star={ratio:.1f}x — probable bot farm")
+        elif ratio > 1:
+            score += 12; signals.append(f"fork/star={ratio:.1f}x — suspicious")
+    if stars >= 100 and forks == 0:
+        score += 15; signals.append("zero forks with high stars")
+
+    # 2. keyword stuffing
+    words = [w for w in desc.split() if len(w) > 2]
+    if words and stars > 100:
+        unique_ratio = len(set(words)) / len(words)
+        if len(words) > 30 and unique_ratio < 0.35:
+            score += 25; signals.append(f"keyword stuffing (diversity={unique_ratio:.2f})")
+        elif len(words) > 20 and unique_ratio < 0.50:
+            score += 15; signals.append(f"possible keyword stuffing (diversity={unique_ratio:.2f})")
+
+    # 3. spam topics/keywords
+    spam_t = [t for t in topics if t in SPAM_TOPICS or any(s in t for s in SPAM_TOPICS)]
+    spam_k = [kw for kw in SPAM_KEYWORDS if kw in desc]
+    if len(spam_t) >= 3:
+        score += 30; signals.append(f"spam topics: {spam_t}")
+    elif spam_t:
+        score += 15; signals.append(f"spam topics: {spam_t}")
+    if len(spam_k) >= 4:
+        score += 25; signals.append(f"spam keywords: {spam_k}")
+    elif len(spam_k) >= 2:
+        score += 12; signals.append(f"suspicious keywords: {spam_k}")
+
+    # 4. topics count
+    if len(topics) > 15:
+        score += 15; signals.append(f"{len(topics)} topics — tag stuffing")
+    elif len(topics) == 0 and stars > 200:
+        score += 5; signals.append("no topics despite high stars")
+
+    # 5. issue vacuum
+    if issues == 0 and stars >= 100:
+        score += 12; signals.append(f"0 issues with {stars} stars")
+
+    # 6. star velocity
+    stars_per_day = stars / max(age_days, 0.5)
+    if age_days <= 3 and stars >= 200:
+        score += 25; signals.append(f"{stars}★ in {age_days:.0f}d — unnatural")
+    elif age_days <= 3 and stars >= 100:
+        score += 15; signals.append(f"{stars}★ in {age_days:.0f}d — suspicious")
+    elif age_days <= 7 and stars_per_day > 100:
+        score += 15; signals.append(f"{stars_per_day:.0f}★/day — very high")
+    elif age_days <= 7 and stars_per_day > 50:
+        score += 8; signals.append(f"{stars_per_day:.0f}★/day — elevated")
+
+    # 7. name pattern
+    owner = full_name.split("/")[0] if "/" in full_name else ""
+    if re.search(r"\d{4,}", owner):
+        score += 5; signals.append("auto-generated org name")
+
+    score = min(score, 100)
+    if score >= 75:
+        cat = "confirmed-spam"
+    elif score >= 50:
+        cat = "likely-fake"
+    elif score >= 26:
+        cat = "suspicious"
+    else:
+        cat = "genuine"
+
+    return int(score), cat, signals
+
+
 # ── GitHub Fetcher ─────────────────────────────────────────────────────────
 
 def fetch_github_trending(limit=20):
@@ -287,6 +393,13 @@ def fetch_github_trending(limit=20):
                 + " ".join(repo.get("topics") or [])
             )
             repo["_relevance_tags"] = extract_relevance_tags(combined_text)
+
+            # Star fake detection
+            fake_score, fake_cat, fake_signals = star_fake_score(repo)
+            repo["_fake_score"] = fake_score
+            repo["_fake_category"] = fake_cat
+            repo["_fake_signals"] = fake_signals
+
             repos.append(repo)
 
         # Sort by stars_per_day (growth rate), not total stars
@@ -1186,6 +1299,27 @@ def main():
 
     gt_source_note = "Google Trends (pytrends)" if gt_available else "cross-platform keyword frequency inference"
 
+    # ── Star fake audit summary ──
+    star_fake_audit = {
+        "total_repos": len(github_repos),
+        "flagged_repos": [],
+        "summary": {"genuine": 0, "suspicious": 0, "likely-fake": 0, "confirmed-spam": 0},
+    }
+    for r in github_repos:
+        cat = r.get("_fake_category", "genuine")
+        score = r.get("_fake_score", 0)
+        star_fake_audit["summary"][cat] = star_fake_audit["summary"].get(cat, 0) + 1
+        if score >= 26:
+            star_fake_audit["flagged_repos"].append({
+                "full_name": r.get("full_name", ""),
+                "score": score,
+                "category": cat,
+                "stars": r.get("stargazers_count", 0),
+                "forks": r.get("forks_count", 0),
+                "signals": r.get("_fake_signals", []),
+            })
+    star_fake_audit["flagged_repos"].sort(key=lambda x: x["score"], reverse=True)
+
     # ── Build output ──
     result = {
         "meta": {
@@ -1229,6 +1363,7 @@ def main():
         "cross_source_clusters": clusters,
         "revenue_signals": revenue,
         "complaint_clusters": complaints,
+        "star_fake_audit": star_fake_audit,
     }
 
     with open(output_path, "w", encoding="utf-8") as f:
